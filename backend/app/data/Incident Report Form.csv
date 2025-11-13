@@ -1,0 +1,14 @@
+Field,Data Type
+Date and Time of Incident,DateTime
+Service User Name,Str
+Location of Incident,Str
+Type of Incident,Str
+Description of the Incident,Str
+Immediate Actions Taken,Str
+Was First Aid Administered?,Boolean
+Were Emergency Services Contacted?,Boolean
+Who Was Notified?,Str
+Witnesses,Str
+Agreed Next Steps,Str
+Risk Assessment Needed,Boolean
+"If Yes, Which Risk Assessment",Str
