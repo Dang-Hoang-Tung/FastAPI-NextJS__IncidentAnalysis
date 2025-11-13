@@ -1,12 +1,12 @@
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Annotated
 
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
+from langchain_core.output_parsers import StrOutputParser
 
 
 # ------------------------------------------------------
@@ -30,10 +30,28 @@ class TranscriptRequest(BaseModel):
 
 
 class PolicyIssue(BaseModel):
-    policy_id: Optional[str] = None   # e.g. "Section 3: Mobility & Moving"
-    description: str                  # what the issue is
-    severity: str                     # Low / Medium / High / Critical
-    evidence: str                     # quotes / details from transcript
+    """Single potential policy issue found in the transcript."""
+    policy_id: Optional[str] = Field(
+        default=None,
+        description="Most relevant policy section name or heading, or null if unclear."
+    )
+    description: str = Field(
+        description="Concise description of the concern / incident aspect."
+    )
+    severity: str = Field(
+        description='Overall severity, one of ["Low", "Medium", "High", "Critical"].'
+    )
+    evidence: str = Field(
+        description="Short quotes or clear references from the transcript."
+    )
+
+
+class PolicyAnalysis(BaseModel):
+    """Structured output for the policy analysis step."""
+    issues: List[PolicyIssue] = Field(
+        default_factory=list,
+        description="List of policy issues identified in the transcript."
+    )
 
 
 class IncidentForm(BaseModel):
@@ -51,6 +69,17 @@ class IncidentForm(BaseModel):
     agreed_next_steps: str
     risk_assessment_needed: bool
     risk_assessment_details: Optional[str] = None  # "If Yes, Which Risk Assessment"
+
+
+class IncidentFormLLM(IncidentForm):
+    """What the LLM returns when generating the incident form."""
+    policies_breached: List[str] = Field(
+        default_factory=list,
+        description="List of relevant policy section names or IDs."
+    )
+    risk_level: str = Field(
+        description='Overall risk level, one of ["Low", "Medium", "High", "Critical"].'
+    )
 
 
 class IncidentResponse(BaseModel):
@@ -97,7 +126,7 @@ Incident Report Form - Fields and Types:
 - risk_assessment_needed (Boolean): true/false.
 - risk_assessment_details (Text): If yes, which risk assessment / details.
 
-In addition, include:
+In addition, derive:
 - policies_breached: list of relevant policy section names or IDs.
 - risk_level: overall risk ["Low", "Medium", "High", "Critical"].
 """
@@ -119,7 +148,7 @@ EMAIL_TEMPLATE = safe_read_text(
 
 
 # ------------------------------------------------------
-# LangChain setup (new style)
+# LangChain setup
 # ------------------------------------------------------
 
 llm = ChatOpenAI(
@@ -127,12 +156,15 @@ llm = ChatOpenAI(
     temperature=0.3,
 )
 
-policy_parser = JsonOutputParser()
-incident_parser = JsonOutputParser()
+# Structured LLMs
+policy_llm = llm.with_structured_output(PolicyAnalysis)
+incident_llm = llm.with_structured_output(IncidentFormLLM)
+
+# We still only need a string parser for the email
 email_parser = StrOutputParser()
 
 
-# ---------- Policy analysis chain ----------
+# ---------- Policy analysis chain (structured) ----------
 
 policy_prompt = PromptTemplate(
     template="""
@@ -148,7 +180,9 @@ POLICIES AND PROCEDURES:
 TRANSCRIPT:
 {transcript}
 
-Identify potential policy issues or concerns. For each issue, provide:
+Identify potential policy issues or concerns.
+
+For each issue, you must populate:
 - policy_id: the most relevant section name or heading from the policy document
              (e.g. "Section 3: Mobility & Moving", "Section 5: Mental Health and Emotional Well-being"),
              or null if not clear.
@@ -156,20 +190,15 @@ Identify potential policy issues or concerns. For each issue, provide:
 - severity: one of ["Low", "Medium", "High", "Critical"] based on risk and recurrence.
 - evidence: short quotes or clear references from the transcript.
 
-Return a JSON array in the following format:
-
-{format_instructions}
+Return data that fits the `PolicyAnalysis` schema (a list of `PolicyIssue` items).
 """,
     input_variables=["policies_text", "transcript"],
-    partial_variables={
-        "format_instructions": policy_parser.get_format_instructions()
-    },
 )
 
-policy_chain = policy_prompt | llm | policy_parser
+policy_chain = policy_prompt | policy_llm
 
 
-# ---------- Incident form chain ----------
+# ---------- Incident form chain (structured) ----------
 
 incident_prompt = PromptTemplate(
     template="""
@@ -179,7 +208,7 @@ Here is the organisation's incident form definition:
 {incident_template_text}
 
 You are also given:
-- A list of policy issues in JSON.
+- A list of policy issues in JSON (already analysed).
 - The original transcript.
 
 POLICY ISSUES (JSON):
@@ -188,39 +217,20 @@ POLICY ISSUES (JSON):
 TRANSCRIPT:
 {transcript}
 
-Using all the above, generate a single JSON object with the following keys:
+Using all the above, fill out the incident report and derive risk information.
+You MUST return data that fits the `IncidentFormLLM` schema, which includes:
 
-{format_instructions}
-
-The JSON object MUST contain at least:
-- date_time_of_incident (string, use ISO 8601 if possible, otherwise a clear human-readable datetime).
-- service_user_name (string)
-- location_of_incident (string)
-- type_of_incident (string)
-- description_of_incident (string)
-- immediate_actions_taken (string)
-- was_first_aid_administered (boolean)
-- were_emergency_services_contacted (boolean)
-- who_was_notified (string)
-- witnesses (string)
-- agreed_next_steps (string)
-- risk_assessment_needed (boolean)
-- risk_assessment_details (string or null)
-
-And also:
-- policies_breached (list of policy_id strings or section names).
-- risk_level (one of ["Low", "Medium", "High", "Critical"]).
+- All form fields (date_time_of_incident, service_user_name, etc.)
+- policies_breached: list of policy_id strings or section names.
+- risk_level: one of ["Low", "Medium", "High", "Critical"].
 """,
     input_variables=["incident_template_text", "issues_json", "transcript"],
-    partial_variables={
-        "format_instructions": incident_parser.get_format_instructions()
-    },
 )
 
-incident_chain = incident_prompt | llm | incident_parser
+incident_chain = incident_prompt | incident_llm
 
 
-# ---------- Email drafting chain ----------
+# ---------- Email drafting chain (string output) ----------
 
 email_prompt = PromptTemplate(
     template="""
@@ -230,7 +240,7 @@ and an email template.
 EMAIL TEMPLATE:
 {email_template}
 
-INCIDENT FORM (JSON):
+INCIDENT FORM (JSON-like data):
 {incident_form_json}
 
 Write a clear, concise, and professional email to the appropriate recipient(s):
@@ -256,68 +266,51 @@ email_chain = email_prompt | llm | email_parser
 async def analyze_transcript(body: TranscriptRequest):
     transcript = body.transcript
 
-    # 1) Policy analysis
-    policy_issues_data = await policy_chain.ainvoke(
+    # 1) Policy analysis -> PolicyAnalysis (structured)
+    policy_result: PolicyAnalysis = await policy_chain.ainvoke(
         {"policies_text": POLICIES_TEXT, "transcript": transcript}
     )
+    issues: List[PolicyIssue] = policy_result.issues or []
 
-    if not isinstance(policy_issues_data, list):
-        policy_issues_data = []
+    # For the incident chain, pass plain JSON-ish data, not Pydantic objects
+    issues_json = [issue.model_dump() for issue in issues]
 
-    issues: List[PolicyIssue] = []
-    for raw in policy_issues_data:
-        try:
-            issues.append(
-                PolicyIssue(
-                    policy_id=raw.get("policy_id"),
-                    description=raw.get("description", ""),
-                    severity=raw.get("severity", "Low"),
-                    evidence=raw.get("evidence", ""),
-                )
-            )
-        except Exception:
-            continue  # skip malformed entries
-
-    # 2) Incident form generation
-    incident_data = await incident_chain.ainvoke(
+    # 2) Incident form generation -> IncidentFormLLM (structured)
+    incident_result: IncidentFormLLM = await incident_chain.ainvoke(
         {
             "incident_template_text": INCIDENT_TEMPLATE_TEXT,
-            "issues_json": policy_issues_data,
+            "issues_json": issues_json,
             "transcript": transcript,
         }
     )
 
-    if not isinstance(incident_data, dict):
-        incident_data = {}
-
+    # Split the structured result into:
+    # - form fields
+    # - policies_breached + risk_level
     incident_form = IncidentForm(
-        date_time_of_incident=incident_data.get("date_time_of_incident", ""),
-        service_user_name=incident_data.get("service_user_name", ""),
-        location_of_incident=incident_data.get("location_of_incident", ""),
-        type_of_incident=incident_data.get("type_of_incident", ""),
-        description_of_incident=incident_data.get("description_of_incident", ""),
-        immediate_actions_taken=incident_data.get("immediate_actions_taken", ""),
-        was_first_aid_administered=incident_data.get(
-            "was_first_aid_administered", False
-        ),
-        were_emergency_services_contacted=incident_data.get(
-            "were_emergency_services_contacted", False
-        ),
-        who_was_notified=incident_data.get("who_was_notified", ""),
-        witnesses=incident_data.get("witnesses", ""),
-        agreed_next_steps=incident_data.get("agreed_next_steps", ""),
-        risk_assessment_needed=incident_data.get("risk_assessment_needed", False),
-        risk_assessment_details=incident_data.get("risk_assessment_details"),
+        date_time_of_incident=incident_result.date_time_of_incident,
+        service_user_name=incident_result.service_user_name,
+        location_of_incident=incident_result.location_of_incident,
+        type_of_incident=incident_result.type_of_incident,
+        description_of_incident=incident_result.description_of_incident,
+        immediate_actions_taken=incident_result.immediate_actions_taken,
+        was_first_aid_administered=incident_result.was_first_aid_administered,
+        were_emergency_services_contacted=incident_result.were_emergency_services_contacted,
+        who_was_notified=incident_result.who_was_notified,
+        witnesses=incident_result.witnesses,
+        agreed_next_steps=incident_result.agreed_next_steps,
+        risk_assessment_needed=incident_result.risk_assessment_needed,
+        risk_assessment_details=incident_result.risk_assessment_details,
     )
 
-    policies_breached = incident_data.get("policies_breached", []) or []
-    risk_level = incident_data.get("risk_level", "Low")
+    policies_breached = incident_result.policies_breached or []
+    risk_level = incident_result.risk_level or "Low"
 
-    # 3) Email draft
+    # 3) Email draft -> string
     email_text = await email_chain.ainvoke(
         {
             "email_template": EMAIL_TEMPLATE,
-            "incident_form_json": incident_data,
+            "incident_form_json": incident_result.model_dump(),
         }
     )
 
