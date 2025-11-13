@@ -1,11 +1,9 @@
-import csv
 from pathlib import Path
 from typing import Optional, List
 
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-# LangChain (new layout)
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
@@ -39,17 +37,29 @@ class PolicyIssue(BaseModel):
 
 
 class IncidentForm(BaseModel):
-    title: str
-    incident_summary: str
-    policies_breached: List[str]
-    risk_level: str
-    recommended_actions: List[str]
+    # Matches the Incident Report Form table
+    date_time_of_incident: str               # ISO datetime string or human-readable
+    service_user_name: str
+    location_of_incident: str
+    type_of_incident: str
+    description_of_incident: str
+    immediate_actions_taken: str
+    was_first_aid_administered: bool
+    were_emergency_services_contacted: bool
+    who_was_notified: str
+    witnesses: str
+    agreed_next_steps: str
+    risk_assessment_needed: bool
+    risk_assessment_details: Optional[str] = None  # "If Yes, Which Risk Assessment"
 
 
 class IncidentResponse(BaseModel):
     incident_form: IncidentForm
     email_draft: str
     issues: List[PolicyIssue]
+    # derived, not on the physical form but useful for UI/email
+    policies_breached: List[str]
+    risk_level: str
 
 
 # ------------------------------------------------------
@@ -69,28 +79,28 @@ def safe_read_text(path: Path, default: str = "") -> str:
 # 1) Policies & procedures (full document)
 POLICIES_TEXT = safe_read_text(DATA_DIR / "Policies and Procedures Document.txt")
 
-# 2) Incident report form “template” – derive from CSV headers
-def load_incident_form_fields(path: Path) -> List[str]:
-    if not path.exists():
-        return []
-    with path.open(newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        try:
-            headers = next(reader)
-        except StopIteration:
-            headers = []
-    # strip whitespace
-    return [h.strip() for h in headers if h and h.strip()]
+# 2) Incident report form “template” – now fixed to match your table
+INCIDENT_TEMPLATE_TEXT = """
+Incident Report Form - Fields and Types:
 
-INCIDENT_FIELDS = load_incident_form_fields(DATA_DIR / "Incident Report Form.csv")
+- date_time_of_incident (DateTime): Date and time of the incident.
+- service_user_name (Text): Name of the service user.
+- location_of_incident (Text): Where the incident took place.
+- type_of_incident (Text): Brief label/category for the incident.
+- description_of_incident (Text): Full description of what happened.
+- immediate_actions_taken (Text): Actions taken immediately after the incident.
+- was_first_aid_administered (Boolean): true/false.
+- were_emergency_services_contacted (Boolean): true/false.
+- who_was_notified (Text): People/services who were informed.
+- witnesses (Text): Names/roles of any witnesses.
+- agreed_next_steps (Text): Agreed follow-up actions.
+- risk_assessment_needed (Boolean): true/false.
+- risk_assessment_details (Text): If yes, which risk assessment / details.
 
-INCIDENT_TEMPLATE_TEXT = (
-    "Incident Report Form fields:\n"
-    + "\n".join(f"- {field}" for field in INCIDENT_FIELDS)
-    if INCIDENT_FIELDS
-    else "Incident Report Form with standard fields such as date, time, location, "
-         "individual involved, description of incident, actions taken, and follow-up."
-)
+In addition, include:
+- policies_breached: list of relevant policy section names or IDs.
+- risk_level: overall risk ["Low", "Medium", "High", "Critical"].
+"""
 
 # 3) Email template (you can create / change this file)
 EMAIL_TEMPLATE = safe_read_text(
@@ -165,7 +175,7 @@ incident_prompt = PromptTemplate(
     template="""
 You are completing an incident report form for a social care provider.
 
-Here are the organisation's incident form fields:
+Here is the organisation's incident form definition:
 {incident_template_text}
 
 You are also given:
@@ -178,18 +188,28 @@ POLICY ISSUES (JSON):
 TRANSCRIPT:
 {transcript}
 
-Using all the above, generate a single JSON object for the incident form with
-the following structure:
+Using all the above, generate a single JSON object with the following keys:
 
 {format_instructions}
 
-Guidance:
-- "title": a short, clear title for the incident (e.g. "Repeated falls at home").
-- "incident_summary": clear narrative of what happened, drawing on transcript.
-- "policies_breached": list of policy section names or IDs that are relevant.
-- "risk_level": overall risk level, one of ["Low", "Medium", "High", "Critical"].
-- "recommended_actions": list of concrete next steps (e.g. arrange risk assessment,
-  inform family, review care plan, contact GP, etc.).
+The JSON object MUST contain at least:
+- date_time_of_incident (string, use ISO 8601 if possible, otherwise a clear human-readable datetime).
+- service_user_name (string)
+- location_of_incident (string)
+- type_of_incident (string)
+- description_of_incident (string)
+- immediate_actions_taken (string)
+- was_first_aid_administered (boolean)
+- were_emergency_services_contacted (boolean)
+- who_was_notified (string)
+- witnesses (string)
+- agreed_next_steps (string)
+- risk_assessment_needed (boolean)
+- risk_assessment_details (string or null)
+
+And also:
+- policies_breached (list of policy_id strings or section names).
+- risk_level (one of ["Low", "Medium", "High", "Critical"]).
 """,
     input_variables=["incident_template_text", "issues_json", "transcript"],
     partial_variables={
@@ -236,9 +256,6 @@ email_chain = email_prompt | llm | email_parser
 async def analyze_transcript(body: TranscriptRequest):
     transcript = body.transcript
 
-    # print(transcript)
-    # return transcript[:20]
-
     # 1) Policy analysis
     policy_issues_data = await policy_chain.ainvoke(
         {"policies_text": POLICIES_TEXT, "transcript": transcript}
@@ -259,8 +276,7 @@ async def analyze_transcript(body: TranscriptRequest):
                 )
             )
         except Exception:
-            # Skip malformed entries rather than breaking the whole request
-            continue
+            continue  # skip malformed entries
 
     # 2) Incident form generation
     incident_data = await incident_chain.ainvoke(
@@ -275,12 +291,27 @@ async def analyze_transcript(body: TranscriptRequest):
         incident_data = {}
 
     incident_form = IncidentForm(
-        title=incident_data.get("title", "Incident Report"),
-        incident_summary=incident_data.get("incident_summary", ""),
-        policies_breached=incident_data.get("policies_breached", []),
-        risk_level=incident_data.get("risk_level", "Low"),
-        recommended_actions=incident_data.get("recommended_actions", []),
+        date_time_of_incident=incident_data.get("date_time_of_incident", ""),
+        service_user_name=incident_data.get("service_user_name", ""),
+        location_of_incident=incident_data.get("location_of_incident", ""),
+        type_of_incident=incident_data.get("type_of_incident", ""),
+        description_of_incident=incident_data.get("description_of_incident", ""),
+        immediate_actions_taken=incident_data.get("immediate_actions_taken", ""),
+        was_first_aid_administered=incident_data.get(
+            "was_first_aid_administered", False
+        ),
+        were_emergency_services_contacted=incident_data.get(
+            "were_emergency_services_contacted", False
+        ),
+        who_was_notified=incident_data.get("who_was_notified", ""),
+        witnesses=incident_data.get("witnesses", ""),
+        agreed_next_steps=incident_data.get("agreed_next_steps", ""),
+        risk_assessment_needed=incident_data.get("risk_assessment_needed", False),
+        risk_assessment_details=incident_data.get("risk_assessment_details"),
     )
+
+    policies_breached = incident_data.get("policies_breached", []) or []
+    risk_level = incident_data.get("risk_level", "Low")
 
     # 3) Email draft
     email_text = await email_chain.ainvoke(
@@ -294,48 +325,6 @@ async def analyze_transcript(body: TranscriptRequest):
         incident_form=incident_form,
         email_draft=email_text,
         issues=issues,
+        policies_breached=policies_breached,
+        risk_level=risk_level,
     )
-
-
-# # ------------------------------------------------------
-# # Existing example endpoints (unchanged)
-# # ------------------------------------------------------
-
-# @app.get("/api")
-# def root():
-#     return {"message": "API is running"}
-
-
-# @app.get("/api/items/{item_id}")
-# def read_item(item_id: int, q: Optional[str] = None):
-#     return {"item_id": item_id, "q": q}
-
-
-# class Item(BaseModel):
-#     name: str
-#     description: Optional[str] = None
-#     price: float
-#     tax: Optional[float] = None
-
-
-# @app.post("/api/items")
-# def create_item(item: Item):
-#     return item
-
-
-# ENGINEER_ROLES = [
-#     {"title": "Frontend Developer", "mainskill": "React"},
-#     {"title": "Backend Developer", "mainskill": "Node.js"},
-#     {"title": "Fullstack Developer", "mainskill": "Next.js"},
-#     {"title": "Machine Learning Engineer", "mainskill": "Tensorflow"},
-#     {"title": "Data Scientist", "mainskill": "Apache Spark"},
-#     {"title": "Software Architect", "mainskill": "System Analysis"},
-# ]
-
-
-# @app.get("/api/engineer-roles")
-# async def read_role(title: str):
-#     for role in ENGINEER_ROLES:
-#         if role["title"].casefold() == title.casefold():
-#             return role
-#     return None

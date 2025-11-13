@@ -6,17 +6,27 @@ type PolicyIssue = {
 };
 
 type IncidentForm = {
-  title: string;
-  incident_summary: string;
-  policies_breached: string[];
-  risk_level: string;
-  recommended_actions: string[];
+  date_time_of_incident: string;
+  service_user_name: string;
+  location_of_incident: string;
+  type_of_incident: string;
+  description_of_incident: string;
+  immediate_actions_taken: string;
+  was_first_aid_administered: boolean;
+  were_emergency_services_contacted: boolean;
+  who_was_notified: string;
+  witnesses: string;
+  agreed_next_steps: string;
+  risk_assessment_needed: boolean;
+  risk_assessment_details?: string | null;
 };
 
 type IncidentResponse = {
   incident_form: IncidentForm;
   email_draft: string;
   issues: PolicyIssue[];
+  policies_breached: string[];
+  risk_level: string;
 };
 
 // 👇 Example transcript (you can paste the full file contents here)
@@ -45,7 +55,8 @@ export default async function MyNextFastAPIApp() {
     return <div>Failed to get incident analysis.</div>;
   }
 
-  const { incident_form, email_draft, issues } = analysis;
+  const { incident_form, email_draft, issues, policies_breached, risk_level } =
+    analysis;
 
   return (
     <main style={{ padding: "1.5rem", fontFamily: "system-ui, sans-serif" }}>
@@ -54,31 +65,61 @@ export default async function MyNextFastAPIApp() {
       <section style={{ marginTop: "1rem" }}>
         <h2>Incident Form</h2>
         <p>
-          <strong>Title:</strong> {incident_form.title}
+          <strong>Date &amp; Time:</strong>{" "}
+          {incident_form.date_time_of_incident}
         </p>
         <p>
-          <strong>Risk level:</strong> {incident_form.risk_level}
+          <strong>Service User:</strong> {incident_form.service_user_name}
         </p>
         <p>
-          <strong>Summary:</strong> {incident_form.incident_summary}
+          <strong>Location:</strong> {incident_form.location_of_incident}
         </p>
-
-        {incident_form.policies_breached?.length > 0 && (
+        <p>
+          <strong>Type of Incident:</strong> {incident_form.type_of_incident}
+        </p>
+        <p>
+          <strong>Description:</strong> {incident_form.description_of_incident}
+        </p>
+        <p>
+          <strong>Immediate Actions Taken:</strong>{" "}
+          {incident_form.immediate_actions_taken}
+        </p>
+        <p>
+          <strong>First Aid Administered:</strong>{" "}
+          {incident_form.was_first_aid_administered ? "Yes" : "No"}
+        </p>
+        <p>
+          <strong>Emergency Services Contacted:</strong>{" "}
+          {incident_form.were_emergency_services_contacted ? "Yes" : "No"}
+        </p>
+        <p>
+          <strong>Who Was Notified:</strong> {incident_form.who_was_notified}
+        </p>
+        <p>
+          <strong>Witnesses:</strong> {incident_form.witnesses}
+        </p>
+        <p>
+          <strong>Agreed Next Steps:</strong> {incident_form.agreed_next_steps}
+        </p>
+        <p>
+          <strong>Risk Assessment Needed:</strong>{" "}
+          {incident_form.risk_assessment_needed ? "Yes" : "No"}
+        </p>
+        {incident_form.risk_assessment_needed && (
           <p>
-            <strong>Policies breached:</strong>{" "}
-            {incident_form.policies_breached.join(", ")}
+            <strong>Risk Assessment Details:</strong>{" "}
+            {incident_form.risk_assessment_details || "Not specified"}
           </p>
         )}
 
-        {incident_form.recommended_actions?.length > 0 && (
-          <>
-            <strong>Recommended actions:</strong>
-            <ul>
-              {incident_form.recommended_actions.map((action, idx) => (
-                <li key={idx}>{action}</li>
-              ))}
-            </ul>
-          </>
+        <p style={{ marginTop: "0.75rem" }}>
+          <strong>Overall Risk Level:</strong> {risk_level}
+        </p>
+
+        {policies_breached?.length > 0 && (
+          <p>
+            <strong>Policies breached:</strong> {policies_breached.join(", ")}
+          </p>
         )}
       </section>
 
@@ -136,7 +177,6 @@ async function analyzeExampleTranscript(): Promise<IncidentResponse | null> {
       headers: {
         "Content-Type": "application/json",
       },
-      // 👇 Send the example transcript to the FastAPI backend
       body: JSON.stringify({ transcript: EXAMPLE_TRANSCRIPT }),
     });
 
