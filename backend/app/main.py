@@ -4,9 +4,11 @@ from typing import Optional, List
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_community.vectorstores import FAISS
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 # ------------------------------------------------------
@@ -107,8 +109,27 @@ EMAIL_TEMPLATE = safe_read_text(
 )
 
 
+
 # ------------------------------------------------------
-# LLM Setup
+# RAG: Build FAISS Vectorstore
+# ------------------------------------------------------
+
+splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=200)
+policy_chunks = splitter.split_text(POLICIES_TEXT)
+
+embedding = OpenAIEmbeddings()
+policy_db = FAISS.from_texts(policy_chunks, embedding=embedding)
+
+
+def get_relevant_policies(query: str, k: int = 4) -> str:
+    """Retrieve top-k most relevant policy sections."""
+    docs = policy_db.similarity_search(query, k=k)
+    return "\n\n".join(doc.page_content for doc in docs)
+
+
+
+# ------------------------------------------------------
+# LLM Setup with fallback models
 # ------------------------------------------------------
 
 primary_llm = ChatOpenAI(
@@ -123,28 +144,27 @@ fallback_llm = ChatOpenAI(
     timeout=40,
 )
 
-# Automatically retry with fallback if:
-#  - primary times out
-#  - primary returns invalid JSON
-#  - primary returns malformed output
 llm = primary_llm.with_fallbacks([fallback_llm])
 
-
-# Structured output LLMs
 policy_llm = llm.with_structured_output(PolicyAnalysis)
 incident_llm = llm.with_structured_output(IncidentForm)
 
-# Email uses plain string output
 email_parser = StrOutputParser()
 
 
-# ---------- Policy analysis prompt ----------
+
+# ------------------------------------------------------
+# Policy analysis chain
+# ------------------------------------------------------
 
 policy_prompt = PromptTemplate(
     template="""
 You are an expert in social care.
 
-POLICIES AND PROCEDURES:
+RELEVANT POLICY CONTEXT (retrieved via RAG):
+{policy_context}
+
+FULL POLICIES AND PROCEDURES (may be long):
 {policies_text}
 
 CONVERSATION TRANSCRIPT:
@@ -152,13 +172,16 @@ CONVERSATION TRANSCRIPT:
 
 Identify potential policy issues.
 """,
-    input_variables=["policies_text", "transcript"],
+    input_variables=["policies_text", "transcript", "policy_context"],
 )
 
 policy_chain = policy_prompt | policy_llm
 
 
-# ---------- Incident form prompt ----------
+
+# ------------------------------------------------------
+# Incident form chain
+# ------------------------------------------------------
 
 incident_prompt = PromptTemplate(
     template="""
@@ -167,21 +190,27 @@ You are completing a structured incident form.
 FORM DEFINITION:
 {incident_form_template}
 
+RELEVANT POLICY CONTEXT (retrieved via RAG):
+{policy_context}
+
 POLICY ISSUES (JSON):
 {issues_json}
 
 TRANSCRIPT:
 {transcript}
 
-Fill in the full incident form comprehensively.
+Fill in the incident form accurately and comprehensively.
 """,
-    input_variables=["incident_form_template", "issues_json", "transcript"],
+    input_variables=["incident_form_template", "issues_json", "transcript", "policy_context"],
 )
 
 incident_chain = incident_prompt | incident_llm
 
 
-# ---------- Email generation ----------
+
+# ------------------------------------------------------
+# Email generation chain
+# ------------------------------------------------------
 
 email_prompt = PromptTemplate(
     template="""
@@ -190,22 +219,31 @@ You are generating an escalation email.
 EMAIL TEMPLATE:
 {email_template}
 
+RELEVANT POLICY CONTEXT (retrieved via RAG):
+{policy_context}
+
 INCIDENT FORM (JSON):
 {incident_form_json}
 
 POLICY ISSUES IDENTIFIED (JSON):
 {issues_json}
 
-Write a professional email draft summarizing the incident, including:
-- what happened (based on the incident form)
-- which policies or procedure sections may be relevant (based on the issues)
-- why these are concerns (briefly)
-- what actions or follow-up may be needed
+Write a clear, professional email summarizing:
+- What happened
+- Which policies may be involved
+- Why these issues matter
+- Any needed follow-up actions
 """,
-    input_variables=["email_template", "incident_form_json", "issues_json"],
+    input_variables=[
+        "email_template",
+        "incident_form_json",
+        "issues_json",
+        "policy_context",
+    ],
 )
 
 email_chain = email_prompt | llm | email_parser
+
 
 
 # ------------------------------------------------------
@@ -216,30 +254,38 @@ email_chain = email_prompt | llm | email_parser
 async def analyze_transcript(body: TranscriptRequest):
     transcript = body.transcript
 
-    # Step 1: Internal policy analysis (not returned to frontend)
+    # Step 0 — RAG retrieval
+    policy_context = get_relevant_policies(transcript)
+
+    # Step 1 — Policy analysis
     policy_result: PolicyAnalysis = await policy_chain.ainvoke(
-        {"policies_text": POLICIES_TEXT, "transcript": transcript}
+        {
+            "policies_text": POLICIES_TEXT,
+            "transcript": transcript,
+            "policy_context": policy_context,
+        }
     )
     issues_json = [i.model_dump() for i in policy_result.issues]
 
-    # Step 2: Generate structured IncidentForm
+    # Step 2 — Incident form generation
     incident_form: IncidentForm = await incident_chain.ainvoke(
         {
             "incident_form_template": INCIDENT_FORM_TEMPLATE,
             "issues_json": issues_json,
             "transcript": transcript,
+            "policy_context": policy_context,
         }
     )
 
-    # Step 3: Generate email
+    # Step 3 — Email generation
     email_text = await email_chain.ainvoke(
         {
             "email_template": EMAIL_TEMPLATE,
             "incident_form_json": incident_form.model_dump(),
             "issues_json": issues_json,
+            "policy_context": policy_context,
         }
     )
-
 
     return IncidentResponse(
         incident_form=incident_form,
