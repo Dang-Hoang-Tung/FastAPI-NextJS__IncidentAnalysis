@@ -27,15 +27,15 @@ All frontend code is in `frontend/app/page.tsx`
 Firstly, set env var:
 - `export OPENAI_API_KEY=sk...`
 
-Option 1. Using Docker:
+Option 1. Using Docker (remember to set env var):
 - `docker compose up --build`
 - Go to localhost:3000 to try it
 
 Option 2. Manually:
-- cd into backend/app:
+- cd into backend/app (remember to set env var):
   - `python -m venv venv && source venv/bin/activate`
   - `pip install -r requirements.txt`
-  - `uvicorn main:app --reload`
+  - `uvicorn app.main:app --reload`
 - cd into frontend/app: 
   - `npm install`
   - `npm run dev`
