@@ -42,8 +42,6 @@ Greg Jones: "Yeah, maybe... I just hate this feeling. I don't want it happening 
 Julie Peaterson: "I completely understand, Greg. You're doing great by calling in. We'll get you back on your feet and figure out how to prevent this from happening again."
 `;
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
 
 export default function IncidentAnalysisPage() {
   const [transcript, setTranscript] = useState<string>(EXAMPLE_TRANSCRIPT);
@@ -56,6 +54,7 @@ export default function IncidentAnalysisPage() {
     setError(null);
 
     try {
+      const API_BASE_URL = "";
       const response = await fetch(`${API_BASE_URL}/api/analyze`, {
         method: "POST",
         headers: {
@@ -145,7 +144,7 @@ export default function IncidentAnalysisPage() {
 
   const textareaStyle: React.CSSProperties = {
     width: "100%",
-    minHeight: "360px",
+    minHeight: "600px",
     borderRadius: "14px",
     border: "1px solid #cbd5f5",
     padding: "0.9rem 1rem",
@@ -450,7 +449,7 @@ export default function IncidentAnalysisPage() {
                     fontSize: "0.82rem",
                     fontFamily:
                       'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                    maxHeight: "360px",
+                    maxHeight: "640px",
                     overflow: "auto",
                   }}
                 >

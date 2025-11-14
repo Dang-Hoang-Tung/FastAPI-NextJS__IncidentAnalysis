@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: incident-backend-dev
+    environment:
+      # Loaded from your shell or .env file
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      # Live-reload backend code
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    networks:
+      - incident-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: incident-frontend-dev
+    volumes:
+      # Live-reload frontend code
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - incident-net
+
+networks:
+  incident-net:
+    driver: bridge
