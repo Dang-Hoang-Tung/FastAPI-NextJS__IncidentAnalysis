@@ -111,10 +111,24 @@ EMAIL_TEMPLATE = safe_read_text(
 # LLM Setup
 # ------------------------------------------------------
 
-llm = ChatOpenAI(
+primary_llm = ChatOpenAI(
     model="gpt-4o-mini",
-    temperature=0.3,
+    temperature=0,
+    timeout=20,
 )
+
+fallback_llm = ChatOpenAI(
+    model="gpt-4o",
+    temperature=0,
+    timeout=40,
+)
+
+# Automatically retry with fallback if:
+#  - primary times out
+#  - primary returns invalid JSON
+#  - primary returns malformed output
+llm = primary_llm.with_fallbacks([fallback_llm])
+
 
 # Structured output LLMs
 policy_llm = llm.with_structured_output(PolicyAnalysis)
@@ -188,7 +202,7 @@ Write a professional email draft summarizing the incident, including:
 - why these are concerns (briefly)
 - what actions or follow-up may be needed
 """,
-    input_variables=["email_template", "incident_form_json"],
+    input_variables=["email_template", "incident_form_json", "issues_json"],
 )
 
 email_chain = email_prompt | llm | email_parser
