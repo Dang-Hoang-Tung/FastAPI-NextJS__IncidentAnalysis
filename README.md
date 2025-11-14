@@ -2,19 +2,9 @@
 
 This is an AI analysis system that processes social care call/meeting data, analyses it against organisation policies, and generates appropriate responses.
 
-## How to run
+## Demo screenshot
 
-Set Env:
-- `export OPENAI_API_KEY=sk...`
-
-Option 1. Using Docker:
-- `docker compose up --build`
-- Go to localhost:3000 to try it
-
-Option 2. Manually:
-- cd into backend/app: `uvicorn main:app --reload`
-- cd into frontend/app: `npm run dev`
-- Go to localhost:3000 to try it
+<img width="881" height="948" alt="image" src="https://github.com/user-attachments/assets/fe0f7e66-3fd7-439a-bb6a-541143141952" />
 
 ## Codebase overview
 
@@ -32,7 +22,16 @@ All frontend code is in `frontend/app/page.tsx`
 - Fetching logic
 - Displaying to user
 
+## How to run locally
 
-## Demo screenshot
+Set Env:
+- `export OPENAI_API_KEY=sk...`
 
-<img width="881" height="948" alt="image" src="https://github.com/user-attachments/assets/fe0f7e66-3fd7-439a-bb6a-541143141952" />
+Option 1. Using Docker:
+- `docker compose up --build`
+- Go to localhost:3000 to try it
+
+Option 2. Manually:
+- cd into backend/app: `uvicorn main:app --reload`
+- cd into frontend/app: `npm run dev`
+- Go to localhost:3000 to try it
