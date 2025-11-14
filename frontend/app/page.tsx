@@ -1,10 +1,3 @@
-type PolicyIssue = {
-  policy_id?: string | null;
-  description: string;
-  severity: string;
-  evidence: string;
-};
-
 type IncidentForm = {
   date_time_of_incident: string;
   service_user_name: string;
@@ -24,9 +17,6 @@ type IncidentForm = {
 type IncidentResponse = {
   incident_form: IncidentForm;
   email_draft: string;
-  issues: PolicyIssue[];
-  policies_breached: string[];
-  risk_level: string;
 };
 
 // 👇 Example transcript (you can paste the full file contents here)
@@ -55,8 +45,7 @@ export default async function MyNextFastAPIApp() {
     return <div>Failed to get incident analysis.</div>;
   }
 
-  const { incident_form, email_draft, issues, policies_breached, risk_level } =
-    analysis;
+  const { incident_form, email_draft } = analysis;
 
   return (
     <main style={{ padding: "1.5rem", fontFamily: "system-ui, sans-serif" }}>
@@ -111,46 +100,8 @@ export default async function MyNextFastAPIApp() {
             {incident_form.risk_assessment_details || "Not specified"}
           </p>
         )}
-
-        <p style={{ marginTop: "0.75rem" }}>
-          <strong>Overall Risk Level:</strong> {risk_level}
-        </p>
-
-        {policies_breached?.length > 0 && (
-          <p>
-            <strong>Policies breached:</strong> {policies_breached.join(", ")}
-          </p>
-        )}
       </section>
 
-      <section style={{ marginTop: "1.5rem" }}>
-        <h2>Detected Issues</h2>
-        {issues.length === 0 && <p>No issues detected.</p>}
-        {issues.map((issue, idx) => (
-          <div
-            key={idx}
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              padding: "0.75rem",
-              marginBottom: "0.75rem",
-            }}
-          >
-            <p>
-              <strong>Policy:</strong> {issue.policy_id ?? "Unspecified"}
-            </p>
-            <p>
-              <strong>Severity:</strong> {issue.severity}
-            </p>
-            <p>
-              <strong>Description:</strong> {issue.description}
-            </p>
-            <p>
-              <strong>Evidence:</strong> {issue.evidence}
-            </p>
-          </div>
-        ))}
-      </section>
 
       <section style={{ marginTop: "1.5rem" }}>
         <h2>Email Draft</h2>
