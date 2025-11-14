@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -9,6 +9,28 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+import logging
+import traceback
+from datetime import datetime
+
+# ------------------------------------------------------
+# Logging
+# ------------------------------------------------------
+
+logger = logging.getLogger("incident_api")
+logger.setLevel(logging.INFO)
+
+# Console handler
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+
+formatter = logging.Formatter(
+    "[%(asctime)s] [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S"
+)
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+
 
 
 # ------------------------------------------------------
@@ -249,43 +271,74 @@ email_chain = email_prompt | llm | email_parser
 # ------------------------------------------------------
 # API Endpoint
 # ------------------------------------------------------
+def log_exception(error: Exception, context: str = ""):
+    logger.error(f"Error during {context}: {error}")
+    logger.error(traceback.format_exc())
+
 
 @app.post("/api/analyze", response_model=IncidentResponse)
 async def analyze_transcript(body: TranscriptRequest):
     transcript = body.transcript
 
-    # Step 0 — RAG retrieval
-    policy_context = get_relevant_policies(transcript)
+    logger.info("Received transcript for analysis.")
+    start_time = datetime.now()
 
-    # Step 1 — Policy analysis
-    policy_result: PolicyAnalysis = await policy_chain.ainvoke(
-        {
-            "policies_text": POLICIES_TEXT,
-            "transcript": transcript,
-            "policy_context": policy_context,
-        }
-    )
-    issues_json = [i.model_dump() for i in policy_result.issues]
+    # ---- Step 0: RAG retrieval ----
+    try:
+        policy_context = get_relevant_policies(transcript)
+        logger.info("Retrieved RAG policy context.")
+    except Exception as e:
+        log_exception(e, "RAG retrieval")
+        raise HTTPException(status_code=500, detail="Failed to retrieve policy context.")
 
-    # Step 2 — Incident form generation
-    incident_form: IncidentForm = await incident_chain.ainvoke(
-        {
-            "incident_form_template": INCIDENT_FORM_TEMPLATE,
-            "issues_json": issues_json,
-            "transcript": transcript,
-            "policy_context": policy_context,
-        }
-    )
+    # ---- Step 1: Policy analysis ----
+    try:
+        policy_result: PolicyAnalysis = await policy_chain.ainvoke(
+            {
+                "policies_text": POLICIES_TEXT,
+                "transcript": transcript,
+                "policy_context": policy_context,
+            }
+        )
+        issues_json = [i.model_dump() for i in policy_result.issues]
+        logger.info(f"Policy analysis complete. Found {len(issues_json)} issues.")
+    except Exception as e:
+        log_exception(e, "policy analysis")
+        raise HTTPException(status_code=500, detail="LLM failed during policy analysis.")
 
-    # Step 3 — Email generation
-    email_text = await email_chain.ainvoke(
-        {
-            "email_template": EMAIL_TEMPLATE,
-            "incident_form_json": incident_form.model_dump(),
-            "issues_json": issues_json,
-            "policy_context": policy_context,
-        }
-    )
+    # ---- Step 2: Incident form generation ----
+    try:
+        incident_form: IncidentForm = await incident_chain.ainvoke(
+            {
+                "incident_form_template": INCIDENT_FORM_TEMPLATE,
+                "issues_json": issues_json,
+                "transcript": transcript,
+                "policy_context": policy_context,
+            }
+        )
+        logger.info("Incident form generation completed.")
+    except Exception as e:
+        log_exception(e, "incident form generation")
+        raise HTTPException(status_code=500, detail="LLM failed during incident form generation.")
+
+    # ---- Step 3: Email generation ----
+    try:
+        email_text = await email_chain.ainvoke(
+            {
+                "email_template": EMAIL_TEMPLATE,
+                "incident_form_json": incident_form.model_dump(),
+                "issues_json": issues_json,
+                "policy_context": policy_context,
+            }
+        )
+        logger.info("Email draft generation completed.")
+    except Exception as e:
+        log_exception(e, "email generation")
+        raise HTTPException(status_code=500, detail="LLM failed during email generation.")
+
+    # ---- Success logging ----
+    duration = (datetime.now() - start_time).total_seconds()
+    logger.info(f"Request completed successfully in {duration:.2f}s")
 
     return IncidentResponse(
         incident_form=incident_form,
