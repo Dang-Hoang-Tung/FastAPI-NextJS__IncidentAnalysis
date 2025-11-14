@@ -133,8 +133,11 @@ EMAIL_TEMPLATE = safe_read_text(
 
 
 # ------------------------------------------------------
-# RAG: Build FAISS Vectorstore
+# RAG: Build FAISS Vectorstore for policies
 # ------------------------------------------------------
+
+# Here we didn't tune the RAG, and there's definitely room for improvement
+# in chunking and embedding strategies.
 
 splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=200)
 policy_chunks = splitter.split_text(POLICIES_TEXT)
@@ -151,7 +154,7 @@ def get_relevant_policies(query: str, k: int = 4) -> str:
 
 
 # ------------------------------------------------------
-# LLM Setup with fallback models
+# Setup LLM Models (with fallback and structured output)
 # ------------------------------------------------------
 
 primary_llm = ChatOpenAI(
@@ -170,9 +173,6 @@ llm = primary_llm.with_fallbacks([fallback_llm])
 
 policy_llm = llm.with_structured_output(PolicyAnalysis)
 incident_llm = llm.with_structured_output(IncidentForm)
-
-email_parser = StrOutputParser()
-
 
 
 # ------------------------------------------------------
@@ -264,6 +264,8 @@ Write a clear, professional email summarizing:
     ],
 )
 
+email_parser = StrOutputParser()
+
 email_chain = email_prompt | llm | email_parser
 
 
@@ -271,6 +273,7 @@ email_chain = email_prompt | llm | email_parser
 # ------------------------------------------------------
 # API Endpoint
 # ------------------------------------------------------
+
 def log_exception(error: Exception, context: str = ""):
     logger.error(f"Error during {context}: {error}")
     logger.error(traceback.format_exc())
