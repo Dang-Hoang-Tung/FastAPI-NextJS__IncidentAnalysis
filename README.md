@@ -32,6 +32,11 @@ Option 1. Using Docker:
 - Go to localhost:3000 to try it
 
 Option 2. Manually:
-- cd into backend/app: `uvicorn main:app --reload`
-- cd into frontend/app: `npm run dev`
+- cd into backend/app:
+  - `python -m venv venv && source venv/bin/activate`
+  - `pip install -r requirements.txt`
+  - `uvicorn main:app --reload`
+- cd into frontend/app: 
+  - `npm install`
+  - `npm run dev`
 - Go to localhost:3000 to try it
