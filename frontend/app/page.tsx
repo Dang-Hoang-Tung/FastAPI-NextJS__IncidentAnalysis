@@ -442,8 +442,8 @@ export default function IncidentAnalysisPage() {
                 <pre
                   style={{
                     whiteSpace: "pre-wrap",
-                    backgroundColor: "#020617",
-                    color: "#e5e7eb",
+                    backgroundColor: "#f3f4f6", // ← lighter grey
+                    color: "#111827",
                     padding: "0.9rem 1rem",
                     borderRadius: "12px",
                     fontSize: "0.82rem",
