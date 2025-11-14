@@ -158,13 +158,13 @@ def get_relevant_policies(query: str, k: int = 4) -> str:
 # ------------------------------------------------------
 
 primary_llm = ChatOpenAI(
-    model="gpt-4o-mini",
+    model="gpt-4o",
     temperature=0,
     timeout=20,
 )
 
 fallback_llm = ChatOpenAI(
-    model="gpt-4o",
+    model="gpt-4o-mini",
     temperature=0,
     timeout=40,
 )

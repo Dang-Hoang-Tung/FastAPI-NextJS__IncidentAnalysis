@@ -24,7 +24,7 @@ All frontend code is in `frontend/app/page.tsx`
 
 ## How to run locally
 
-Set Env:
+Firstly, set env var:
 - `export OPENAI_API_KEY=sk...`
 
 Option 1. Using Docker:
