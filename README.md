@@ -15,3 +15,7 @@ Option 2. Manually:
 - cd into backend/app: `uvicorn main:app --reload`
 - cd into frontend/app: `npm run dev`
 - Go to localhost:3000 to try it
+
+## Demo screenshot
+
+<img width="881" height="948" alt="image" src="https://github.com/user-attachments/assets/fe0f7e66-3fd7-439a-bb6a-541143141952" />
