@@ -16,6 +16,23 @@ Option 2. Manually:
 - cd into frontend/app: `npm run dev`
 - Go to localhost:3000 to try it
 
+## Codebase overview
+
+As this is a prototype, I kept the codebase structure as simple as possible.
+
+All backend code is in `backend/app/main.py`
+- APIs
+- LangChain models (fallback + structured output)
+- LangChain chains
+- RAG system
+- Logging
+
+All frontend code is in `frontend/app/page.tsx`
+- Inputs
+- Fetching logic
+- Displaying to user
+
+
 ## Demo screenshot
 
 <img width="881" height="948" alt="image" src="https://github.com/user-attachments/assets/fe0f7e66-3fd7-439a-bb6a-541143141952" />
